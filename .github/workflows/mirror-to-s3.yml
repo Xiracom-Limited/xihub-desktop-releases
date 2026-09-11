@@ -23,13 +23,15 @@ jobs:
             --repo ${{ github.repository }} \
             --dir release-assets
 
-      # Points every platform's url at its S3 copy instead of this repo's —
-      # otherwise the S3-hosted manifest would still depend on GitHub being
-      # up to actually deliver the update, defeating the point of mirroring.
-      - name: Rewrite latest.json to point at S3
+      # Points every platform's url at the public Laravel download proxy
+      # instead of this repo's GitHub URLs — Garage has no anonymous/public
+      # bucket access at all (every S3 request must be signed), so raw S3
+      # URLs would never be fetchable by the updater's unauthenticated GET.
+      # See LMS's DesktopDownloadController for the proxy itself.
+      - name: Rewrite latest.json to point at the download proxy
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          BASE="https://s3.xiracom.co.ke/xihub-releases/desktop/${TAG}"
+          BASE="https://xihub.co.ke/downloads/desktop/${TAG}"
           jq --arg base "$BASE" '
             .platforms |= with_entries(.value.url |= ($base + "/" + (. | split("/") | last)))
           ' release-assets/latest.json > release-assets/latest.json.tmp
@@ -37,7 +39,9 @@ jobs:
 
       # Garage (self-hosted, S3-compatible) needs path-style addressing —
       # matches AWS_USE_PATH_STYLE_ENDPOINT=true in the backend's own config
-      # for the same instance.
+      # for the same instance. No --acl flag: Garage doesn't support object
+      # ACLs, and doesn't need to here — the bucket stays fully private,
+      # DesktopDownloadController reads it server-side with its own key.
       - name: Upload to S3 (Garage)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_RELEASES_ACCESS_KEY_ID }}
@@ -50,9 +54,9 @@ jobs:
           # Versioned copy — kept around so an older latest.json (cached by a
           # client, or a rollback) can still resolve its own release's files.
           aws s3 cp release-assets/ "s3://xihub-releases/desktop/${TAG}/" \
-            --recursive --endpoint-url https://s3.xiracom.co.ke --acl public-read
+            --recursive --endpoint-url https://s3.xiracom.co.ke
 
           # Stable path the in-app updater actually polls — always the
           # current version.
           aws s3 cp release-assets/latest.json "s3://xihub-releases/desktop/latest.json" \
-            --endpoint-url https://s3.xiracom.co.ke --acl public-read
+            --endpoint-url https://s3.xiracom.co.ke

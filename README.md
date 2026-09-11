@@ -4,4 +4,4 @@ Public release artifacts for [xihub-desktop](https://github.com/Xiracom-Limited/
 
 Download the latest installer for your platform from the [Releases page](https://github.com/Xiracom-Limited/xihub-desktop-releases/releases/latest).
 
-Publishing a release here also mirrors it to `https://s3.xiracom.co.ke/xihub-releases/desktop/` automatically (see `.github/workflows/mirror-to-s3.yml`) — the in-app updater checks S3 first and falls back to this repo if S3 is unreachable.
+Publishing a release here also mirrors it to our S3 (Garage) bucket automatically (see `.github/workflows/mirror-to-s3.yml`) — Garage has no anonymous/public access, so it's served publicly via `https://xihub.co.ke/downloads/desktop/` (LMS's `DesktopDownloadController`) rather than a raw S3 URL. The in-app updater checks that first and falls back to this repo if it's unreachable.
