@@ -6,6 +6,14 @@ name: Mirror release to S3
 on:
   release:
     types: [published]
+  # Lets a maintainer re-run the mirror for an already-published release —
+  # e.g. after fixing this workflow itself, without needing to cut a new
+  # release just to refresh what's sitting in S3.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of an already-published release to re-mirror"
+        required: true
 
 permissions:
   contents: read
@@ -14,14 +22,20 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          echo "value=${{ github.event.inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
-          gh release download "${{ github.event.release.tag_name }}" \
+          gh release download "${{ steps.tag.outputs.value }}" \
             --repo ${{ github.repository }} \
-            --dir release-assets
+            --dir release-assets \
+            --clobber
 
       # Points every platform's url at the public Laravel download proxy
       # instead of this repo's GitHub URLs — Garage has no anonymous/public
@@ -30,7 +44,7 @@ jobs:
       # See LMS's DesktopDownloadController for the proxy itself.
       - name: Rewrite latest.json to point at the download proxy
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ steps.tag.outputs.value }}"
           BASE="https://xihub.co.ke/downloads/desktop/${TAG}"
           jq --arg base "$BASE" '
             .platforms |= with_entries(.value.url |= ($base + "/" + (. | split("/") | last)))
@@ -49,7 +63,7 @@ jobs:
           AWS_DEFAULT_REGION: garage
         run: |
           aws configure set default.s3.addressing_style path
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ steps.tag.outputs.value }}"
 
           # Versioned copy — kept around so an older latest.json (cached by a
           # client, or a rollback) can still resolve its own release's files.
