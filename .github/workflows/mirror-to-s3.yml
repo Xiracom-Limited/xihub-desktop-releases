@@ -1,0 +1,58 @@
+name: Mirror release to S3
+
+# Fires only on an actual manual publish (not draft creation) — this is what
+# preserves the existing "build, review the draft, then publish" safety gate
+# for the S3 copy too, without needing to touch the build pipeline itself.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo ${{ github.repository }} \
+            --dir release-assets
+
+      # Points every platform's url at its S3 copy instead of this repo's —
+      # otherwise the S3-hosted manifest would still depend on GitHub being
+      # up to actually deliver the update, defeating the point of mirroring.
+      - name: Rewrite latest.json to point at S3
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          BASE="https://s3.xiracom.co.ke/xihub-releases/desktop/${TAG}"
+          jq --arg base "$BASE" '
+            .platforms |= with_entries(.value.url |= ($base + "/" + (. | split("/") | last)))
+          ' release-assets/latest.json > release-assets/latest.json.tmp
+          mv release-assets/latest.json.tmp release-assets/latest.json
+
+      # Garage (self-hosted, S3-compatible) needs path-style addressing —
+      # matches AWS_USE_PATH_STYLE_ENDPOINT=true in the backend's own config
+      # for the same instance.
+      - name: Upload to S3 (Garage)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_RELEASES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_RELEASES_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: garage
+        run: |
+          aws configure set default.s3.addressing_style path
+          TAG="${{ github.event.release.tag_name }}"
+
+          # Versioned copy — kept around so an older latest.json (cached by a
+          # client, or a rollback) can still resolve its own release's files.
+          aws s3 cp release-assets/ "s3://xihub-releases/desktop/${TAG}/" \
+            --recursive --endpoint-url https://s3.xiracom.co.ke --acl public-read
+
+          # Stable path the in-app updater actually polls — always the
+          # current version.
+          aws s3 cp release-assets/latest.json "s3://xihub-releases/desktop/latest.json" \
+            --endpoint-url https://s3.xiracom.co.ke --acl public-read
