@@ -21,7 +21,7 @@ jobs:
       - name: Install multimedia libraries for AppImage bundling
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libayatana-appindicator3-dev
 
       - name: Resolve tag
         id: tag
