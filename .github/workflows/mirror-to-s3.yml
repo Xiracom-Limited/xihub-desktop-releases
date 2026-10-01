@@ -18,6 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install multimedia libraries for AppImage bundling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+
       - name: Resolve tag
         id: tag
         run: |
@@ -33,7 +38,7 @@ jobs:
             --dir release-assets \
             --clobber
 
-      - name: Ensure AppImage exists
+      - name: Ensure AppImage exists with bundled dependencies
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

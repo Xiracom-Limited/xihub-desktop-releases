@@ -6,13 +6,7 @@ VERSION="${TAG#v}"
 ASSETS_DIR="release-assets"
 NAME="xihub"
 
-# Check if AppImage already exists
-if compgen -G "${ASSETS_DIR}/*.AppImage" > /dev/null; then
-  echo "AppImage already exists in ${ASSETS_DIR}; skipping build."
-  exit 0
-fi
-
-echo "No AppImage found; building from tarball..."
+echo "Building AppImage from tarball with bundled dependencies..."
 TAR_FILE=$(find "${ASSETS_DIR}" -name "*linux*.tar.gz" -o -name "*.tar.gz" | head -n 1)
 if [ -z "$TAR_FILE" ] || [ ! -f "$TAR_FILE" ]; then
   echo "Error: No Linux tarball found in ${ASSETS_DIR} to build AppImage from!" >&2
@@ -54,6 +48,9 @@ cd "${HERE}"
 exec "${HERE}/xihub" "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
+
+echo "Bundling shared library dependencies (FFmpeg / libav)..."
+python3 .github/scripts/bundle_appimage_deps.py "$APPDIR"
 
 TOOL_DIR="/tmp/appimagetool-extracted"
 if [ ! -d "$TOOL_DIR" ]; then
