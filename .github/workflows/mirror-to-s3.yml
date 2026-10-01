@@ -1,14 +1,8 @@
 name: Mirror release to S3
 
-# Fires only on an actual manual publish (not draft creation) — this is what
-# preserves the existing "build, review the draft, then publish" safety gate
-# for the S3 copy too, without needing to touch the build pipeline itself.
 on:
   release:
     types: [published]
-  # Lets a maintainer re-run the mirror for an already-published release —
-  # e.g. after fixing this workflow itself, without needing to cut a new
-  # release just to refresh what's sitting in S3.
   workflow_dispatch:
     inputs:
       tag:
@@ -22,6 +16,8 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Resolve tag
         id: tag
         run: |
@@ -37,11 +33,6 @@ jobs:
             --dir release-assets \
             --clobber
 
-      # Points every platform's url at the public Laravel download proxy
-      # instead of this repo's GitHub URLs — Garage has no anonymous/public
-      # bucket access at all (every S3 request must be signed), so raw S3
-      # URLs would never be fetchable by the updater's unauthenticated GET.
-      # See LMS's DesktopDownloadController for the proxy itself.
       - name: Rewrite or generate latest.json
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.value }}
@@ -55,52 +46,9 @@ jobs:
             mv release-assets/latest.json.tmp release-assets/latest.json
           else
             echo "No latest.json found in release assets; generating manifest from artifacts..."
-            python3 -c '
-import os, glob, json, datetime
-
-tag = os.environ.get("RELEASE_TAG", "")
-version = tag.lstrip("v")
-base = f"https://xihub.co.ke/downloads/desktop/{tag}"
-assets_dir = "release-assets"
-
-win_exe = next((os.path.basename(f) for f in glob.glob(f"{assets_dir}/*.exe")), None)
-win_zip = next((os.path.basename(f) for f in glob.glob(f"{assets_dir}/*win*.zip") or glob.glob(f"{assets_dir}/*.zip")), None)
-linux_deb = next((os.path.basename(f) for f in glob.glob(f"{assets_dir}/*.deb")), None)
-linux_tar = next((os.path.basename(f) for f in glob.glob(f"{assets_dir}/*linux*.tar.gz") or glob.glob(f"{assets_dir}/*.tar.gz")), None)
-linux_appimage = next((os.path.basename(f) for f in glob.glob(f"{assets_dir}/*.AppImage")), None)
-
-platforms = {}
-if win_exe:
-    platforms["windows-x86_64"] = {"url": f"{base}/{win_exe}"}
-    platforms["windows-x86_64-nsis"] = {"url": f"{base}/{win_exe}"}
-if win_zip:
-    platforms["windows-x86_64-zip"] = {"url": f"{base}/{win_zip}"}
-if linux_deb:
-    platforms["linux-x86_64-deb"] = {"url": f"{base}/{linux_deb}"}
-    platforms["linux-x86_64"] = {"url": f"{base}/{linux_deb}"}
-if linux_tar:
-    platforms["linux-x86_64-tar"] = {"url": f"{base}/{linux_tar}"}
-if linux_appimage:
-    platforms["linux-x86_64-appimage"] = {"url": f"{base}/{linux_appimage}"}
-    platforms["linux-x86_64"] = {"url": f"{base}/{linux_appimage}"}
-
-manifest = {
-    "version": version,
-    "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "platforms": platforms,
-}
-
-with open(f"{assets_dir}/latest.json", "w") as f:
-    json.dump(manifest, f, indent=2)
-'
-            cat release-assets/latest.json
+            python3 .github/scripts/generate_manifest.py
           fi
 
-      # Garage (self-hosted, S3-compatible) needs path-style addressing —
-      # matches AWS_USE_PATH_STYLE_ENDPOINT=true in the backend's own config
-      # for the same instance. No --acl flag: Garage doesn't support object
-      # ACLs, and doesn't need to here — the bucket stays fully private,
-      # DesktopDownloadController reads it server-side with its own key.
       - name: Upload to S3 (Garage)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_RELEASES_ACCESS_KEY_ID }}
@@ -110,13 +58,9 @@ with open(f"{assets_dir}/latest.json", "w") as f:
           aws configure set default.s3.addressing_style path
           TAG="${{ steps.tag.outputs.value }}"
 
-          # Versioned copy — kept around so an older latest.json (cached by a
-          # client, or a rollback) can still resolve its own release's files.
           aws s3 cp release-assets/ "s3://xihub-releases/desktop/${TAG}/" \
             --recursive --endpoint-url https://s3.xiracom.co.ke
 
-          # Stable path the in-app updater actually polls — always the
-          # current version.
           if [ -f release-assets/latest.json ]; then
             aws s3 cp release-assets/latest.json "s3://xihub-releases/desktop/latest.json" \
               --endpoint-url https://s3.xiracom.co.ke
