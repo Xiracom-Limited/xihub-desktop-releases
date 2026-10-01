@@ -10,7 +10,7 @@ on:
         required: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   mirror:
@@ -32,6 +32,16 @@ jobs:
             --repo ${{ github.repository }} \
             --dir release-assets \
             --clobber
+
+      - name: Ensure AppImage exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/build_appimage_from_tar.sh "${{ steps.tag.outputs.value }}"
+          gh release upload "${{ steps.tag.outputs.value }}" \
+            --repo ${{ github.repository }} \
+            release-assets/*.AppImage \
+            --clobber || true
 
       - name: Rewrite or generate latest.json
         env:
