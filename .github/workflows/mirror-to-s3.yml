@@ -44,12 +44,16 @@ jobs:
       # See LMS's DesktopDownloadController for the proxy itself.
       - name: Rewrite latest.json to point at the download proxy
         run: |
-          TAG="${{ steps.tag.outputs.value }}"
-          BASE="https://xihub.co.ke/downloads/desktop/${TAG}"
-          jq --arg base "$BASE" '
-            .platforms |= with_entries(.value.url |= ($base + "/" + (. | split("/") | last)))
-          ' release-assets/latest.json > release-assets/latest.json.tmp
-          mv release-assets/latest.json.tmp release-assets/latest.json
+          if [ -f release-assets/latest.json ]; then
+            TAG="${{ steps.tag.outputs.value }}"
+            BASE="https://xihub.co.ke/downloads/desktop/${TAG}"
+            jq --arg base "$BASE" '
+              .platforms |= with_entries(.value.url |= ($base + "/" + (. | split("/") | last)))
+            ' release-assets/latest.json > release-assets/latest.json.tmp
+            mv release-assets/latest.json.tmp release-assets/latest.json
+          else
+            echo "No latest.json found in release assets; skipping rewrite."
+          fi
 
       # Garage (self-hosted, S3-compatible) needs path-style addressing —
       # matches AWS_USE_PATH_STYLE_ENDPOINT=true in the backend's own config
@@ -72,5 +76,7 @@ jobs:
 
           # Stable path the in-app updater actually polls — always the
           # current version.
-          aws s3 cp release-assets/latest.json "s3://xihub-releases/desktop/latest.json" \
-            --endpoint-url https://s3.xiracom.co.ke
+          if [ -f release-assets/latest.json ]; then
+            aws s3 cp release-assets/latest.json "s3://xihub-releases/desktop/latest.json" \
+              --endpoint-url https://s3.xiracom.co.ke
+          fi
